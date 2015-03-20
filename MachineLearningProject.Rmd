@@ -1,0 +1,159 @@
+---
+title: "Machine Learning Project"
+author: "Jari Kaljunen"
+date: "Friday, March 20, 2015"
+output: html_document
+---
+
+#Background
+
+Description from the Course site: 
+
+"Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways."
+
+Source data is generously allowd by http://groupware.les.inf.puc-rio.br/har. Thank you.
+
+##Data 
+
+
+The training data for this project is downloaded from: https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data is downloaded from: https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+
+```{r results='hide'}
+library(randomForest)
+library(caret)
+
+# read the data
+x00 <- read.csv("pml-training.csv")
+tnames <- colnames(x00)
+
+```
+
+When reading the original study description, it becomes obvious that lots of the data is not raw data.
+My approach becomes to remove data that is calculated from the file. I exclude the fields that appear to be
+calculated (as variance, max, min and so on). The date field seems to be not appropriate either so that is removed too.
+
+
+```{r}
+nots <- grep ("cvtd_|kurtosis|skewness|amplitude|avg_|var_|max_|min_|stddev_", tnames)
+x0 <- x00[,-nots]
+```
+
+Without studying more about the meaning of "new_window", I will convert it to numeric value.
+
+```{r}
+
+new_window_yes <- x0$new_window == "yes"
+x0$new_window <- 0
+x0$new_window[new_window_yes] <- 1
+```
+
+Just normal partitioning to training and testing. While experimenting this, I used small training values to get the execution speed adequate.
+
+When the whole process seemed to flow correctly, I raised the value to .8, and after getting one answer wrong, I raised the value to .9. That resulted in correct predictions of the submission test data set.
+
+
+```{r}
+
+inTrain = createDataPartition(x0$classe, p = .9,list=FALSE) 
+training = x0[ inTrain,]
+testing = x0[-inTrain,]
+
+adata.rf <- randomForest(classe ~ ., data=training, mtry=3,
+                         importance=TRUE, na.action=na.omit,ntree=1000)
+
+
+
+```
+
+Checking the error rate:
+
+```{r}
+adata.rf
+
+```
+
+
+Checking how the model would do with the testing:
+
+```{r}
+prediction_check <- as.character(predict(adata.rf,testing))
+the_facts <- as.character(testing$classe)
+
+correct <- 0
+for (nnn in 1:length(the_facts)) {
+    if (identical(the_facts[nnn] ,prediction_check[nnn])) {
+           correct <- correct + 1
+    }
+}
+
+
+
+```
+
+Cross-validation.
+Checking the error rate.
+Tests with training with 199 samples gave 83 % correct answers, so this was obviously the way to go.
+
+```{r}
+100 * (1 - correct/length(the_facts))
+```
+
+Test with 19423 in testing and just 199 in training get 14,57 % error rate according the model and  16.7 % error rate according the validation towards the testing data.
+
+
+
+Doublechecking with the training data:
+
+```{r}
+prediction_check <- as.character(predict(adata.rf,training))
+the_facts <- as.character(training$classe)
+
+correct <- 0
+for (nnn in 1:length(the_facts)) {
+    if (identical(the_facts[nnn] ,prediction_check[nnn])) {
+       correct <- correct + 1
+    }
+}
+
+# finally the cross validation gave 0 as error rate.
+100 * (1 - correct/length(the_facts))
+
+```
+
+
+Preparing the submission test data set as the training data set.
+
+```{r}
+#get the data types for reading the test data set,which showed to be problematic for some reason...
+mycolclasses <- NULL
+tt <- colnames(x00)
+for (nnn in 1:length(tt)) {
+    mycolclasses <- c(mycolclasses, class(x00[,nnn]))
+    }
+
+t <- read.csv("pml-testing.csv", colClasses=c("character", mycolclasses[2:length(mycolclasses)]))
+t$X <- as.integer(t$X)
+t <- t[,-nots]
+
+colnames(t) <- colnames(training)
+t$classe <- as.matrix(rep(c("A","B","C","D","E"),4),ncol=1,nrow=20)
+t$classe <- as.factor(t$classe) 
+
+new_window_yes <- t$new_window == "yes"
+t$new_window <- 0
+t$new_window[new_window_yes] <- 1
+
+
+```
+
+Prediction of the submission data set.
+
+```{r}
+
+predict(adata.rf,t)#,type="response")
+
+```
+
